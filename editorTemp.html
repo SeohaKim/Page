@@ -230,6 +230,11 @@
     </div>
   </div>
   <script>
+    // iOS에서 <a download>가 제한되므로, userAgent 체크
+    function isIOS() {
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes('Mac') && 'ontouchend' in document)
+    }
+
     // 전역 변수 (마지막으로 불러온 파일 이름 기억)
     let lastLoadedFileName = null
 
@@ -298,18 +303,32 @@
         alert("이 환경에서는 파일 다운로드가 제한됩니다.\nCSV 내용:\n\n" + csvContent)
         return
       }
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.setAttribute("href", url)
-      link.setAttribute("download", "story-export.csv")
-      link.click()
+
+      if (isIOS()) {
+        // iOS에서는 <a download>가 제대로 동작 안 하므로,
+        // 새 탭/창으로 열도록 처리
+        const fileURL = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent)
+        const win = window.open(fileURL, '_blank')
+        if (!win) {
+          alert("팝업이 차단된 것 같습니다. 팝업을 허용해주세요.")
+        }
+      } else {
+        // 일반 브라우저 (데스크톱 등)
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.setAttribute("href", url)
+        link.setAttribute("download", "story-export.csv")
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
     }
+
+    document.getElementById("saveCsvBtn").addEventListener("click", saveCsv)
 
     // Alt+S -> 불러온 CSV 파일 이름으로 다시 다운로드 (덮어쓰기처럼 보이게)
     function altSave() {
-      // lastLoadedFileName 을 알면, 같은 이름으로 다운로드
-      // 실제 OS 상에서 완전히 덮어쓰기 되진 않지만, 파일명 동일하게 다운로드
       if (!lastLoadedFileName) {
         alert("불러온 파일이 없어서 Alt+S로 저장할 수 없습니다.")
         return
@@ -323,13 +342,25 @@
         alert("이 환경에서는 파일 다운로드가 제한됩니다.\nCSV 내용:\n\n" + csvContent)
         return
       }
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.setAttribute("href", url)
-      // 파일명 동일하게
-      link.setAttribute("download", lastLoadedFileName)
-      link.click()
+
+      if (isIOS()) {
+        const fileURL = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent)
+        // iOS - open in new tab
+        const win = window.open(fileURL, '_blank')
+        if (!win) {
+          alert("팝업이 차단된 것 같습니다. 팝업을 허용해주세요.")
+        }
+      } else {
+        // 일반 브라우저 다운로드
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.setAttribute("href", url)
+        link.setAttribute("download", lastLoadedFileName)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
     }
 
     function parseCsv(csvText) {
@@ -436,26 +467,18 @@
       let step = 1
       const tail = k.substring(1)
       for (const c of tail) {
-        if (c === "A" || c === "B") {
-          step++
-        } else if (c === "R") {
-          step--
-        }
+        if (c === "A" || c === "B") { step++ }
+        else if (c === "R") { step-- }
         if (step < 1) return 0
       }
       return step
     }
 
     function isWritten(d) {
-      // merge == true 면 작성된 것으로 처리
-      if (d.merge) {
-        return true
-      }
-      // E 노드인지?
+      if (d.merge) return true
       if (d.key === "E") {
         return (d.woman.trim() !== "" && d.woman.trim() !== '(여자가 자리에서 일어났다)')
       }
-      // 기본 placeholder?
       if (d.woman === '(새로운 대사)' && d.manA === 'A선택?' && d.manB === 'B선택?') {
         return false
       }
@@ -495,13 +518,13 @@
         if (node) {
           if (c === "A") {
             addBubble(`당신(A): ${node.manA}`, true)
-            prefix = prefix + "A"
+            prefix += "A"
           } else if (c === "B") {
             addBubble(`당신(B): ${node.manB}`, true)
-            prefix = prefix + "B"
+            prefix += "B"
           } else if (c === "R") {
             addBubble('(Rewind!)', true)
-            prefix = prefix + "R"
+            prefix += "R"
           }
           const nextEff = getEffectiveKey(prefix)
           ensureDialogueExists(nextEff)
