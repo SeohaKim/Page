@@ -1,0 +1,988 @@
+<!DOCTYPE
+	html>
+<html
+	lang="ko">
+
+<head>
+	<meta
+		charset="UTF-8" />
+	<title>
+		Playdate
+		Story
+		Editor
+	</title>
+	<style>
+		body {
+			font-family: sans-serif;
+			margin: 0;
+			padding: 0;
+			display: flex;
+			flex-direction: column;
+			height: 100vh;
+		}
+
+		header {
+			padding: 8px 16px;
+			background-color: #f2f2f2;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+
+		#container {
+			display: flex;
+			flex: 1;
+			overflow: hidden;
+		}
+
+		.sidebar {
+			width: 250px;
+			border-right: 1px solid #ddd;
+			overflow-y: auto;
+			padding: 8px;
+		}
+
+		.main-content {
+			flex: 1;
+			display: flex;
+			flex-direction: row;
+			overflow: hidden;
+		}
+
+		.editor {
+			flex: 1;
+			padding: 16px;
+			overflow-y: auto;
+			display: flex;
+			flex-direction: column;
+		}
+
+		.right-sidebar {
+			width: 300px;
+			border-left: 1px solid #ddd;
+			overflow-x: visible;
+			overflow-y: auto;
+			padding: 8px;
+			background-color: #fafafa;
+		}
+
+		.chat-bubble {
+			position: relative;
+			padding: 8px;
+			margin: 8px 0;
+			border-radius: 8px;
+			background-color: #eee;
+			cursor: default;
+			max-width: 80%;
+			margin-left: 16px;
+			margin-right: 16px;
+		}
+
+		.chat-bubble:not(.player)::after {
+			content: "";
+			position: absolute;
+			bottom: 0.5rem;
+			left: -10px;
+			width: 0;
+			height: 0;
+			border: 10px solid transparent;
+			border-right-color: #eee;
+		}
+
+		.chat-bubble.player::after {
+			content: "";
+			position: absolute;
+			bottom: 0.5rem;
+			right: -10px;
+			width: 0;
+			height: 0;
+			border: 10px solid transparent;
+			border-left-color: #cce0ff;
+		}
+
+		.chat-bubble.player {
+			background-color: #cce0ff;
+			align-self: flex-end;
+		}
+
+		.field {
+			margin-bottom: 8px;
+		}
+
+		label {
+			display: inline-block;
+			width: 100px;
+			font-weight: 700;
+		}
+
+		textarea,
+		input[type=text] {
+			font-family: sans-serif;
+		}
+
+		textarea {
+			width: 180px;
+			height: 40px;
+			resize: none;
+		}
+
+		input[type=text] {
+			width: 180px;
+		}
+
+		.merge-options {
+			margin-top: 8px;
+			padding: 4px;
+			border: 1px solid #ccc;
+			display: inline-block;
+		}
+
+		.merge-options label {
+			width: auto;
+			margin-right: 8px;
+		}
+
+		.buttons {
+			margin-top: 16px;
+		}
+
+		.choice-buttons {
+			margin-top: 12px;
+		}
+
+		.choice-buttons button {
+			margin-right: 8px;
+		}
+
+		.row {
+			display: flex;
+			align-items: center;
+			margin-bottom: 8px;
+		}
+
+		.row label {
+			margin-right: 8px;
+		}
+
+		.ab-buttons {
+			margin-left: 8px;
+		}
+
+		.unwritten {
+			color: #999;
+			font-style: italic;
+		}
+
+		.unwritten span {
+			cursor: pointer;
+			text-decoration: underline;
+		}
+
+		.step-group {
+			border: 1px solid #ccc;
+			padding: 4px;
+			margin-bottom: 6px;
+		}
+
+		.step-header {
+			font-weight: 700;
+			margin-bottom: 4px;
+		}
+
+		.tab-container {
+			display: flex;
+			gap: 8px;
+			align-items: center;
+		}
+
+		.tab-container button {
+			padding: 4px 8px;
+			cursor: pointer;
+		}
+
+		#testView {
+			padding: 8px;
+			border: 1px solid #bbb;
+			margin-top: 8px;
+			display: none;
+		}
+	</style>
+</head>
+
+<body>
+	<header>
+		<div
+			class="tab-container">
+			<button
+				id="editModeBtn">에디트
+				모드</button>
+			<button
+				id="testModeBtn">테스트
+				모드</button>
+		</div>
+		<div>
+			<input
+				type="file"
+				id="jsonFileInput"
+				accept=".json" />
+			<button
+				id="newFileBtn">새로운
+				파일
+				만들기</button>
+			<button
+				id="saveJsonBtn">JSON
+				내보내기</button>
+		</div>
+	</header>
+	<div
+		id="container">
+		<div
+			class="sidebar"
+			id="sidebar">
+		</div>
+		<div
+			class="main-content">
+			<div
+				class="editor"
+				id="editor">
+				<p>
+					JSON을
+					불러온
+					뒤,
+					S
+					키를
+					시작으로
+					진행하세요.
+				</p>
+				<div
+					id="testView">
+					<p>
+						<b>테스트
+							모드</b>:
+						대화
+						진행
+						확인
+					</p>
+					<div
+						id="testDisplay">
+					</div>
+					<div
+						id="testChoice">
+					</div>
+				</div>
+			</div>
+			<div
+				class="right-sidebar"
+				id="rightSidebar">
+			</div>
+		</div>
+	</div>
+
+	<script>
+		// We'll wrap logic in DOMContentLoaded to ensure #testView is in the DOM.
+		// Now we handle JSON instead of CSV.
+
+		document.addEventListener('DOMContentLoaded', () => {
+
+			let lastLoadedFileName = null
+			let dialogues = []
+			let currentKey = "S"
+
+			let currentPath = [{ nodeKey: "S" }]
+
+			let isTestMode = false
+
+			const jsonInput = document.getElementById("jsonFileInput")
+			const newFileBtn = document.getElementById("newFileBtn")
+			const saveJsonBtn = document.getElementById("saveJsonBtn")
+
+			jsonInput.addEventListener("change", function (e) {
+				const file = e.target.files[0]
+				if (!file) return
+				lastLoadedFileName = file.name
+
+				const reader = new FileReader()
+				reader.onload = function (evt) {
+					const jsonText = evt.target.result
+					parseJson(jsonText)
+					ensureSKeyExists()
+					ensureENodeExists()
+					currentKey = "S"
+					currentPath = [{ nodeKey: "S" }]
+					renderConversation()
+					renderEditor(currentKey)
+					renderGraph(currentKey)
+					if (isTestMode) updateTestView()
+				}
+				reader.readAsText(file, "utf-8")
+			})
+
+			newFileBtn.addEventListener('click', () => {
+				// Start from scratch
+				dialogues = []
+				lastLoadedFileName = null
+				currentKey = "S"
+				currentPath = [{ nodeKey: "S" }]
+				ensureSKeyExists()
+				ensureENodeExists()
+				renderConversation()
+				renderEditor(currentKey)
+				renderGraph(currentKey)
+				if (isTestMode) updateTestView()
+			})
+
+			saveJsonBtn.addEventListener('click', saveJson)
+
+			window.addEventListener("keydown", function (e) {
+				if (e.ctrlKey && e.key.toLowerCase() === "s") {
+					e.preventDefault()
+					saveNodeChanges()
+				}
+			})
+
+			document.getElementById("editModeBtn").addEventListener("click", () => {
+				isTestMode = false
+				const tv = document.getElementById("testView")
+				if (tv) tv.style.display = "none"
+				renderEditor(currentKey)
+			})
+			document.getElementById("testModeBtn").addEventListener("click", () => {
+				isTestMode = true
+				const tv = document.getElementById("testView")
+				if (tv) tv.style.display = "block"
+				updateTestView()
+			})
+
+			function parseJson(jsonText) {
+				try {
+					const data = JSON.parse(jsonText)
+					if (!Array.isArray(data)) {
+						alert("JSON 최상위 구조는 배열이어야 합니다.")
+						return
+					}
+					dialogues = data
+				} catch (err) {
+					alert("JSON 파싱 오류: " + err)
+					dialogues = []
+				}
+			}
+
+			function ensureSKeyExists() {
+				const hasS = dialogues.some(d => d.key.trim() === "S")
+				if (!hasS) {
+					dialogues.push({
+						key: "S",
+						woman: "(처음으로 자리에 앉았다)",
+						manA: "어... 안녕?",
+						manB: "오랜만이야...",
+						merge: false,
+						mergeTarget: ""
+					})
+				}
+			}
+
+			function ensureENodeExists() {
+				let e = dialogues.find(x => x.key === "E")
+				if (!e) {
+					dialogues.push({
+						key: "E",
+						woman: "(여자가 자리에서 일어났다)",
+						manA: "",
+						manB: "",
+						merge: false,
+						mergeTarget: ""
+					})
+				}
+			}
+
+			function saveJson() {
+				// We'll just stringify the array of dialogues.
+				// We'll pretty print it.
+				const jsonContent = JSON.stringify(dialogues, null, 2)
+
+				// If there's no loaded file name, we can just call it "story.json".
+				let outName = lastLoadedFileName || "story.json"
+				if (!outName.toLowerCase().endsWith(".json")) {
+					outName += ".json"
+				}
+
+				// We'll allow user to download.
+				if (window.location.hostname.includes("chat.openai.com")) {
+					alert("이 환경에서는 파일 다운로드가 제한됩니다.\nJSON 내용:\n\n" + jsonContent)
+					return
+				}
+
+				const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8;" })
+				const url = URL.createObjectURL(blob)
+				const link = document.createElement("a")
+				link.setAttribute("href", url)
+				link.setAttribute("download", outName)
+				document.body.appendChild(link)
+				link.click()
+				document.body.removeChild(link)
+			}
+
+			function ensureDialogueExists(key) {
+				let d = dialogues.find(x => x.key === key)
+				if (!d) {
+					d = {
+						key: key,
+						woman: "(새로운 대사)",
+						manA: "A선택?",
+						manB: "B선택?",
+						merge: false,
+						mergeTarget: ""
+					}
+					dialogues.push(d)
+				}
+				return d
+			}
+
+			function getEffectiveKey(k) {
+				const d = dialogues.find(x => x.key === k)
+				if (d && d.merge && d.mergeTarget.trim() !== "") {
+					return d.mergeTarget.trim()
+				}
+				return k
+			}
+
+			function computeStep(k) {
+				if (k === "E") return 999
+				if (!k.startsWith("S")) {
+					return 1
+				}
+				let step = 1
+				const tail = k.substring(1)
+				for (const c of tail) {
+					if (c === "A" || c === "B") { step++ } else if (c === "R") { step-- }
+					if (step < 1) return 0
+				}
+				return step
+			}
+
+			function isWritten(d) {
+				if (d.merge) return true
+				if (d.key === "E") {
+					return (d.woman.trim() !== "" && d.woman.trim() !== "(여자가 자리에서 일어났다)")
+				}
+				if (d.woman === "(새로운 대사)" && d.manA === "A선택?" && d.manB === "B선택?") {
+					return false
+				}
+				return true
+			}
+
+			function saveNodeChanges() {
+				let d = ensureDialogueExists(currentKey)
+
+				const effective = getEffectiveKey(d.key)
+				let realTarget = dialogues.find(x => x.key === effective)
+				if (!realTarget) {
+					realTarget = ensureDialogueExists(effective)
+				}
+
+				let womanInput = document.getElementById("womanInput")
+				let manAInput = document.getElementById("manAInput")
+				let manBInput = document.getElementById("manBInput")
+				let mergeCheck = document.getElementById("mergeCheck")
+				let mergeTargetInput = document.getElementById("mergeTargetInput")
+
+				if (mergeCheck) d.merge = mergeCheck.checked
+				if (mergeTargetInput) d.mergeTarget = mergeTargetInput.value
+
+				if (womanInput) realTarget.woman = womanInput.value
+				if (manAInput) realTarget.manA = manAInput.value
+				if (manBInput) realTarget.manB = manBInput.value
+
+				renderConversation()
+				renderEditor(currentKey)
+				renderGraph(currentKey)
+				if (isTestMode) updateTestView()
+			}
+
+			function renderConversation() {
+				const sidebar = document.getElementById("sidebar")
+				if (!sidebar) return
+				sidebar.innerHTML = ""
+
+				for (let i = 0;i < currentPath.length;i++) {
+					const stepObj = currentPath[i]
+					const node = dialogues.find(x => x.key === getEffectiveKey(stepObj.nodeKey))
+					if (!node) continue
+
+					if (i === 0) {
+						const div = document.createElement("div")
+						div.className = "chat-bubble"
+						div.textContent = `(${stepObj.nodeKey}) 여: ${node.woman}`
+						div.style.cursor = "pointer"
+						div.addEventListener("click", () => {
+							jumpToPathIndex(i)
+						})
+						sidebar.appendChild(div)
+					} else {
+						const prevStep = currentPath[i - 1]
+						const prevNode = dialogues.find(x => x.key === getEffectiveKey(prevStep.nodeKey))
+						if (!prevNode) continue
+						let choiceLabel = (stepObj.choice === 'A') ? prevNode.manA : (stepObj.choice === 'B' ? prevNode.manB : 'Rewind!')
+
+						const divM = document.createElement("div")
+						divM.className = "chat-bubble player"
+						divM.textContent = `당신(${stepObj.choice ?? '?'}): ${choiceLabel}`
+						divM.addEventListener("click", () => {
+							jumpToPathIndex(i)
+						})
+						sidebar.appendChild(divM)
+
+						const divW = document.createElement("div")
+						divW.className = "chat-bubble"
+						divW.textContent = `(${stepObj.nodeKey}) 여: ${node.woman}`
+						divW.style.cursor = "pointer"
+						divW.addEventListener("click", () => {
+							jumpToPathIndex(i)
+						})
+						sidebar.appendChild(divW)
+					}
+				}
+			}
+
+			function jumpToPathIndex(idx) {
+				if (idx < 0 || idx >= currentPath.length) return
+				currentKey = currentPath[idx].nodeKey
+				currentPath = currentPath.slice(0, idx + 1)
+				renderConversation()
+				renderEditor(currentKey)
+				renderGraph(currentKey)
+				if (isTestMode) updateTestView()
+			}
+
+			function renderEditor(k) {
+				const ed = document.getElementById("editor")
+				if (!ed) return
+
+				if (isTestMode) {
+					ed.innerHTML = "<p>테스트 모드이므로 편집 UI는 숨김 상태입니다.\n 상단 '에디트 모드' 버튼을 누르세요.</p>"
+					return
+				}
+
+				const d = ensureDialogueExists(k)
+				ed.innerHTML = ""
+
+				const eff = getEffectiveKey(k)
+				let targetLabel = ""
+				if (eff !== k) {
+					targetLabel = `(머지 → ${eff})`
+				}
+
+				const keyDiv = document.createElement("div")
+				keyDiv.className = "field"
+				keyDiv.innerHTML = `<label>키:</label> <input type="text" disabled value="${d.key}"/> <span>${targetLabel}</span>`
+				ed.appendChild(keyDiv)
+
+				const womanDiv = document.createElement("div")
+				womanDiv.className = "field"
+				const effectiveDialogue = dialogues.find(x => x.key === eff)
+				const effWoman = effectiveDialogue ? effectiveDialogue.woman : ""
+				womanDiv.innerHTML = `<label>여자의 응답:</label>\n<textarea id="womanInput">${effWoman}</textarea>`
+				ed.appendChild(womanDiv)
+
+				const manA = document.createElement("div")
+				manA.className = "row"
+				const effManA = effectiveDialogue ? effectiveDialogue.manA : ""
+				manA.innerHTML = `<label>남자 A선택:</label>\n<textarea id="manAInput">${effManA}</textarea>
+ <button id="inlineA">A로 진행</button>`
+				ed.appendChild(manA)
+
+				const manB = document.createElement("div")
+				manB.className = "row"
+				const effManB = effectiveDialogue ? effectiveDialogue.manB : ""
+				manB.innerHTML = `<label>남자 B선택:</label>\n<textarea id="manBInput">${effManB}</textarea>
+ <button id="inlineB">B로 진행</button>`
+				ed.appendChild(manB)
+
+				const mergeDiv = document.createElement("div")
+				mergeDiv.className = "merge-options"
+				const cstr = d.merge ? 'checked' : ''
+				mergeDiv.innerHTML = `<label>머지(merge): <input type="checkbox" id="mergeCheck" ${cstr}></label>\n<label>타겟 키: <input type="text" id="mergeTargetInput" value="${d.mergeTarget}"/></label>`
+				ed.appendChild(mergeDiv)
+
+				const saveBtn = document.createElement("button")
+				saveBtn.textContent = "수정 내용 저장"
+				saveBtn.addEventListener("click", () => {
+					saveNodeChanges()
+				})
+				ed.appendChild(saveBtn)
+
+				const rewBtn = document.createElement("button")
+				rewBtn.textContent = 'Rewind(R)'
+				rewBtn.addEventListener('click', () => {
+					currentKey += 'R'
+					currentPath.push({ nodeKey: currentKey, choice: 'R' })
+					ensureDialogueExists(currentKey)
+					renderConversation()
+					renderEditor(currentKey)
+					renderGraph(currentKey)
+					if (isTestMode) updateTestView()
+				})
+				ed.appendChild(rewBtn)
+
+				const customBtn = document.createElement('button')
+				customBtn.textContent = '커스텀 노드로 이동'
+				customBtn.addEventListener('click', () => {
+					const newKey = prompt('커스텀 노드 키 입력:', 'X1')
+					if (!newKey) return
+					currentKey = newKey
+					currentPath.push({ nodeKey: newKey, choice: 'Custom' })
+					ensureDialogueExists(newKey)
+					renderConversation()
+					renderEditor(newKey)
+					renderGraph(newKey)
+					if (isTestMode) updateTestView()
+				})
+				ed.appendChild(customBtn)
+
+				// Inline A / B logic
+				const inlineABtn = document.getElementById('inlineA')
+				if (inlineABtn) {
+					inlineABtn.addEventListener('click', () => {
+						const effk = getEffectiveKey(k)
+						const newK = effk + 'A'
+						currentPath.push({ nodeKey: newK, choice: 'A' })
+						currentKey = newK
+						ensureDialogueExists(newK)
+						renderConversation()
+						renderEditor(newK)
+						renderGraph(newK)
+						if (isTestMode) updateTestView()
+					})
+				}
+				const inlineBBtn = document.getElementById('inlineB')
+				if (inlineBBtn) {
+					inlineBBtn.addEventListener('click', () => {
+						const effk = getEffectiveKey(k)
+						const newK = effk + 'B'
+						currentPath.push({ nodeKey: newK, choice: 'B' })
+						currentKey = newK
+						ensureDialogueExists(newK)
+						renderConversation()
+						renderEditor(newK)
+						renderGraph(newK)
+						if (isTestMode) updateTestView()
+					})
+				}
+			}
+
+			function renderGraph(k) {
+				const container = document.getElementById("rightSidebar")
+				if (!container) return
+				container.innerHTML = `<h3>노드 그래프 (SVG)</h3>`
+
+				const incoming = []
+				const outgoing = [];
+
+				["A", "B", "R"].forEach(sel => {
+					const eff = getEffectiveKey(k)
+					const newK = eff + sel
+					const finalK = getEffectiveKey(newK)
+					const st = computeStep(newK)
+					if (st > 0) {
+						ensureDialogueExists(newK)
+						outgoing.push({ label: sel, rawKey: newK, displayKey: finalK, step: st })
+					}
+				})
+
+				dialogues.forEach(d => {
+					["A", "B", "R"].forEach(sel => {
+						const candidate = d.key + sel
+						const candidateEff = getEffectiveKey(candidate)
+						if (candidateEff === k) {
+							const st = computeStep(candidate)
+							if (st > 0) {
+								incoming.push({ from: d.key, choice: sel })
+							}
+						}
+					})
+				})
+
+				const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+				svg.setAttribute("width", "280")
+				svg.setAttribute("height", "300")
+				svg.style.border = "1px solid #ccc"
+
+				const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs")
+
+				const markerF = document.createElementNS("http://www.w3.org/2000/svg", "marker")
+				markerF.setAttribute("id", "arrowForward")
+				markerF.setAttribute("markerWidth", "10")
+				markerF.setAttribute("markerHeight", "10")
+				markerF.setAttribute("refX", "9")
+				markerF.setAttribute("refY", "3")
+				markerF.setAttribute("orient", "auto")
+
+				const pathF = document.createElementNS("http://www.w3.org/2000/svg", "path")
+				pathF.setAttribute("d", "M0,0 L0,6 L9,3 z")
+				pathF.setAttribute("fill", "#888")
+				markerF.appendChild(pathF)
+				defs.appendChild(markerF)
+
+				const pattern = document.createElementNS("http://www.w3.org/2000/svg", "pattern")
+				pattern.setAttribute("id", "diagHatch")
+				pattern.setAttribute("width", "6")
+				pattern.setAttribute("height", "6")
+				pattern.setAttribute("patternTransform", "rotate(45 0 0)")
+				pattern.setAttribute("patternUnits", "userSpaceOnUse")
+
+				const rectP = document.createElementNS("http://www.w3.org/2000/svg", "rect")
+				rectP.setAttribute("x", "0")
+				rectP.setAttribute("y", "0")
+				rectP.setAttribute("width", "6")
+				rectP.setAttribute("height", "6")
+				rectP.setAttribute("fill", "transparent")
+				pattern.appendChild(rectP)
+
+				const lineP = document.createElementNS("http://www.w3.org/2000/svg", "line")
+				lineP.setAttribute("x1", "0")
+				lineP.setAttribute("y1", "0")
+				lineP.setAttribute("x2", "0")
+				lineP.setAttribute("y2", "6")
+				lineP.setAttribute("stroke", "#999")
+				lineP.setAttribute("stroke-width", "2")
+				pattern.appendChild(lineP)
+
+				defs.appendChild(pattern)
+				svg.appendChild(defs)
+
+				const centerX = 140
+				const centerY = 150
+
+				const incSpacing = incoming.length > 0 ? 120 / incoming.length : 50
+				let incStartY = centerY - ((incoming.length - 1) * incSpacing) / 2
+
+				const outSpacing = outgoing.length > 0 ? 120 / outgoing.length : 50
+				let outStartY = centerY - ((outgoing.length - 1) * outSpacing) / 2
+
+				function createNode(cx, cy, nodeKey) {
+					const d = dialogues.find(x => x.key === nodeKey)
+					const g = document.createElementNS("http://www.w3.org/2000/svg", "g")
+					g.style.cursor = "pointer"
+					g.addEventListener('click', () => {
+						currentKey = nodeKey
+						currentPath.push({ nodeKey: nodeKey, choice: 'GraphJump' })
+						renderConversation()
+						renderEditor(nodeKey)
+						renderGraph(nodeKey)
+						if (isTestMode) updateTestView()
+					})
+
+					const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle")
+					circle.setAttribute("cx", cx)
+					circle.setAttribute("cy", cy)
+					circle.setAttribute("r", "20")
+					if (!d || !isWritten(d)) {
+						circle.setAttribute('fill', 'url(#diagHatch)')
+					} else {
+						circle.setAttribute('fill', '#fff')
+					}
+					circle.setAttribute('stroke', '#333')
+					circle.setAttribute('stroke-width', '2')
+					g.appendChild(circle)
+
+					const text = document.createElementNS("http://www.w3.org/2000/svg", "text")
+					text.setAttribute("x", cx)
+					text.setAttribute("y", cy + 5)
+					text.setAttribute("text-anchor", "middle")
+					text.setAttribute("font-size", "12")
+					text.setAttribute("fill", "#000")
+					text.textContent = nodeKey
+					g.appendChild(text)
+
+					svg.appendChild(g)
+				}
+
+				function createEdge(x1, y1, x2, y2, label) {
+					const line = document.createElementNS("http://www.w3.org/2000/svg", "line")
+					line.setAttribute('x1', x1)
+					line.setAttribute('y1', y1)
+					line.setAttribute('x2', x2)
+					line.setAttribute('y2', y2)
+					line.setAttribute('stroke', '#888')
+					line.setAttribute('stroke-width', '2')
+					line.setAttribute('marker-end', 'url(#arrowForward)')
+					svg.appendChild(line)
+
+					if (label) {
+						const mx = (Number(x1) + Number(x2)) / 2
+						const my = (Number(y1) + Number(y2)) / 2 - 5
+						const t = document.createElementNS("http://www.w3.org/2000/svg", "text")
+						t.setAttribute('x', mx)
+						t.setAttribute('y', my)
+						t.setAttribute('text-anchor', 'middle')
+						t.setAttribute('font-size', '12')
+						t.setAttribute('fill', '#444')
+						t.textContent = '(' + label + ')'
+						svg.appendChild(t)
+					}
+				}
+
+				createNode(centerX, centerY, k)
+
+				incoming.forEach((inc, idx) => {
+					const yPos = incStartY + idx * incSpacing
+					createNode(40, yPos, inc.from)
+					createEdge(60, yPos, centerX - 20, centerY, inc.choice)
+				})
+
+				outgoing.forEach((o, idx) => {
+					const yPos = outStartY + idx * outSpacing
+					createNode(240, yPos, o.displayKey)
+					createEdge(centerX + 20, centerY, 220, yPos, o.label)
+				})
+
+				container.appendChild(svg)
+
+				const unDiv = document.createElement('div')
+				unDiv.innerHTML = '<h4>미작성 노드</h4>'
+
+				const incompleteByStep = {}
+				dialogues.forEach(d => {
+					const eff = getEffectiveKey(d.key)
+					if (eff !== d.key) return
+					const s = computeStep(d.key)
+					if (s > 0) {
+						if (!isWritten(d)) {
+							if (!incompleteByStep[s]) incompleteByStep[s] = []
+							incompleteByStep[s].push(d.key)
+						}
+					}
+				})
+
+				if (Object.keys(incompleteByStep).length === 0) {
+					unDiv.innerHTML += '<p>모두 작성됨</p>'
+				} else {
+					Object.keys(incompleteByStep).sort((a, b) => Number(a) - Number(b)).forEach(stepNum => {
+						const group = document.createElement('div')
+						group.className = "step-group"
+
+						const header = document.createElement('div')
+						header.className = "step-header"
+						header.textContent = `스텝 ${stepNum}`
+						group.appendChild(header)
+
+						incompleteByStep[stepNum].forEach(k2 => {
+							const sp = document.createElement('span')
+							sp.textContent = ' ' + k2 + ' '
+							sp.style.cursor = 'pointer'
+							sp.addEventListener('click', () => {
+								currentKey = k2
+								currentPath.push({ nodeKey: k2, choice: 'JumpIncomplete' })
+								renderConversation()
+								renderEditor(k2)
+								renderGraph(k2)
+								if (isTestMode) updateTestView()
+							})
+							group.appendChild(sp)
+						})
+						unDiv.appendChild(group)
+					})
+				}
+
+				container.appendChild(unDiv)
+			}
+
+			function updateTestView() {
+				const tView = document.getElementById("testView")
+				if (!tView) {
+					console.warn("testView not found in DOM")
+					return
+				}
+				const tDisplay = document.getElementById("testDisplay")
+				const tChoice = document.getElementById("testChoice")
+
+				if (!isTestMode) {
+					tView.style.display = 'none'
+					return
+				}
+				tView.style.display = 'block'
+
+				let node = dialogues.find(x => x.key === getEffectiveKey(currentKey))
+				if (!node) {
+					if (tDisplay) tDisplay.innerHTML = `<p><b>[${currentKey}]</b> 노드는 비어 있습니다.</p>`
+					if (tChoice) {
+						tChoice.innerHTML = `<button id="editJumpBtn">편집하기</button>`
+						const eBtn = document.getElementById('editJumpBtn')
+						if (eBtn) {
+							eBtn.addEventListener('click', () => {
+								isTestMode = false
+								tView.style.display = 'none'
+								renderEditor(currentKey)
+							})
+						}
+					}
+					return
+				}
+
+				if (tDisplay) tDisplay.innerHTML = `<p><b>[${currentKey}]</b> 여: ${node.woman}</p>`
+
+				let html = `<button id="testA">A</button> <button id="testB">B</button> <button id="testR">Rewind</button>`
+				html += ` <button id="testCustomJump">커스텀 이동</button>`
+
+				if (tChoice) tChoice.innerHTML = html
+
+				const btnA = document.getElementById('testA')
+				const btnB = document.getElementById('testB')
+				const btnR = document.getElementById('testR')
+				const btnC = document.getElementById('testCustomJump')
+
+				if (btnA) {
+					btnA.addEventListener('click', () => {
+						let newK = getEffectiveKey(currentKey) + 'A'
+						currentPath.push({ nodeKey: newK, choice: 'A' })
+						currentKey = newK
+						ensureDialogueExists(newK)
+						renderConversation()
+						renderEditor(newK)
+						renderGraph(newK)
+						updateTestView()
+					})
+				}
+				if (btnB) {
+					btnB.addEventListener('click', () => {
+						let newK = getEffectiveKey(currentKey) + 'B'
+						currentPath.push({ nodeKey: newK, choice: 'B' })
+						currentKey = newK
+						ensureDialogueExists(newK)
+						renderConversation()
+						renderEditor(newK)
+						renderGraph(newK)
+						updateTestView()
+					})
+				}
+				if (btnR) {
+					btnR.addEventListener('click', () => {
+						let newK = getEffectiveKey(currentKey) + 'R'
+						currentPath.push({ nodeKey: newK, choice: 'R' })
+						currentKey = newK
+						ensureDialogueExists(newK)
+						renderConversation()
+						renderEditor(newK)
+						renderGraph(newK)
+						updateTestView()
+					})
+				}
+				if (btnC) {
+					btnC.addEventListener('click', () => {
+						let cKey = prompt('이동할 커스텀 노드 키:', 'ZZ')
+						if (!cKey) return
+						currentPath.push({ nodeKey: cKey, choice: 'Custom' })
+						currentKey = cKey
+						ensureDialogueExists(cKey)
+						renderConversation()
+						renderEditor(cKey)
+						renderGraph(cKey)
+						updateTestView()
+					})
+				}
+			}
+		});
+	</script>
+</body>
+
+</html>

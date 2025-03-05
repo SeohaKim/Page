@@ -1,0 +1,878 @@
+<!DOCTYPE
+  html>
+<html
+  lang="ko">
+
+<head>
+  <meta
+    charset="UTF-8" />
+  <title>
+    Playdate
+    Story
+    Editor
+  </title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh
+    }
+
+    header {
+      padding: 8px 16px;
+      background-color: #f2f2f2
+    }
+
+    #container {
+      display: flex;
+      flex: 1;
+      overflow: hidden
+    }
+
+    .sidebar {
+      width: 250px;
+      border-right: 1px solid #ddd;
+      overflow-y: auto;
+      padding: 8px
+    }
+
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: row;
+      overflow: hidden
+    }
+
+    .editor {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column
+    }
+
+    .right-sidebar {
+      width: 300px;
+      border-left: 1px solid #ddd;
+      overflow-x: visible;
+      overflow-y: auto;
+      padding: 8px;
+      background-color: #fafafa
+    }
+
+    .chat-bubble {
+      position: relative;
+      padding: 8px;
+      margin: 8px 0;
+      border-radius: 8px;
+      background-color: #eee;
+      cursor: default;
+      max-width: 80%;
+      margin-left: 16px;
+      margin-right: 16px
+    }
+
+    .chat-bubble:not(.player)::after {
+      content: "";
+      position: absolute;
+      bottom: .5rem;
+      left: -10px;
+      width: 0;
+      height: 0;
+      border: 10px solid transparent;
+      border-right-color: #eee
+    }
+
+    .chat-bubble.player::after {
+      content: "";
+      position: absolute;
+      bottom: .5rem;
+      right: -10px;
+      width: 0;
+      height: 0;
+      border: 10px solid transparent;
+      border-left-color: #cce0ff
+    }
+
+    .chat-bubble.player {
+      background-color: #cce0ff;
+      align-self: flex-end
+    }
+
+    .field {
+      margin-bottom: 8px
+    }
+
+    label {
+      display: inline-block;
+      width: 100px;
+      font-weight: 700
+    }
+
+    textarea,
+    input[type=text] {
+      font-family: sans-serif
+    }
+
+    textarea {
+      width: 180px;
+      height: 40px;
+      resize: none
+    }
+
+    input[type=text] {
+      width: 180px
+    }
+
+    .merge-options {
+      margin-top: 8px;
+      padding: 4px;
+      border: 1px solid #ccc;
+      display: inline-block
+    }
+
+    .merge-options label {
+      width: auto;
+      margin-right: 8px
+    }
+
+    .buttons {
+      margin-top: 16px
+    }
+
+    .choice-buttons {
+      margin-top: 12px
+    }
+
+    .choice-buttons button {
+      margin-right: 8px
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px
+    }
+
+    .row label {
+      margin-right: 8px
+    }
+
+    .ab-buttons {
+      margin-left: 8px
+    }
+
+    .unwritten {
+      color: #999;
+      font-style: italic
+    }
+
+    .unwritten span {
+      cursor: pointer;
+      text-decoration: underline
+    }
+
+    .step-group {
+      border: 1px solid #ccc;
+      padding: 4px;
+      margin-bottom: 6px
+    }
+
+    .step-header {
+      font-weight: 700;
+      margin-bottom: 4px
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>
+      Playdate
+      스토리
+      에디터
+    </h1>
+    <input
+      type="file"
+      id="csvFileInput"
+      accept=".csv" /><button
+      id="saveCsvBtn">CSV
+      내보내기</button>
+  </header>
+  <div
+    id="container">
+    <div
+      class="sidebar"
+      id="sidebar">
+    </div>
+    <div
+      class="main-content">
+      <div
+        class="editor"
+        id="editor">
+        <p>
+          CSV를
+          불러온
+          뒤,
+          S
+          키를
+          시작으로
+          진행하세요.
+        </p>
+      </div>
+      <div
+        class="right-sidebar"
+        id="rightSidebar">
+      </div>
+    </div>
+  </div>
+  <script>
+    // iOS에서 <a download>가 제한되므로, userAgent 체크
+    function isIOS() {
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes('Mac') && 'ontouchend' in document)
+    }
+
+    // 전역 변수 (마지막으로 불러온 파일 이름 기억)
+    let lastLoadedFileName = null
+
+    let dialogues = []
+    let currentKey = "S"
+
+    const csvInput = document.getElementById("csvFileInput")
+    csvInput.addEventListener("change", function (e) {
+      const file = e.target.files[0]
+      if (!file) return
+      lastLoadedFileName = file.name // alt-s 저장에 활용하기 위해
+
+      const reader = new FileReader()
+      reader.onload = function (evt) {
+        const csvText = evt.target.result
+        parseCsv(csvText)
+        ensureSKeyExists()
+        ensureENodeExists()
+        currentKey = "S"
+        renderConversation()
+        renderEditor(currentKey)
+        renderGraph(currentKey)
+      }
+      reader.readAsText(file, "utf-8")
+    })
+
+    window.addEventListener("keydown", function (e) {
+      // Ctrl+S -> 현재 노드 수정 내용 저장
+      if (e.ctrlKey && e.key.toLowerCase() === "s") {
+        e.preventDefault()
+        saveNodeChanges()
+      }
+      // Alt+S -> 불러온 파일에 덮어쓰기 식으로 저장
+      if (e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault()
+        altSave()
+      }
+    })
+
+    function saveNodeChanges() {
+      let d = ensureDialogueExists(currentKey)
+      let womanInput = document.getElementById("womanInput")
+      let manAInput = document.getElementById("manAInput")
+      let manBInput = document.getElementById("manBInput")
+      let mergeCheck = document.getElementById("mergeCheck")
+      let mergeTargetInput = document.getElementById("mergeTargetInput")
+
+      if (womanInput) d.woman = womanInput.value
+      if (manAInput) d.manA = manAInput.value
+      if (manBInput) d.manB = manBInput.value
+      if (mergeCheck) d.merge = mergeCheck.checked
+      if (mergeTargetInput) d.mergeTarget = mergeTargetInput.value
+
+      renderConversation()
+      renderEditor(currentKey)
+      renderGraph(currentKey)
+    }
+
+    function saveCsv() {
+      const csvContent = dialogues.map(d => {
+        const mergeString = d.merge ? "true" : "false"
+        return [d.key, d.woman, d.manA, d.manB, mergeString, d.mergeTarget].join(",")
+      }).join("\n")
+
+      if (window.location.hostname.includes("chat.openai.com")) {
+        alert("이 환경에서는 파일 다운로드가 제한됩니다.\nCSV 내용:\n\n" + csvContent)
+        return
+      }
+
+      if (isIOS()) {
+        // iOS에서는 <a download>가 제대로 동작 안 하므로,
+        // 새 탭/창으로 열도록 처리
+        const fileURL = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent)
+        const win = window.open(fileURL, '_blank')
+        if (!win) {
+          alert("팝업이 차단된 것 같습니다. 팝업을 허용해주세요.")
+        }
+      } else {
+        // 일반 브라우저 (데스크톱 등)
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.setAttribute("href", url)
+        link.setAttribute("download", "story-export.csv")
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
+    }
+
+    document.getElementById("saveCsvBtn").addEventListener("click", saveCsv)
+
+    // Alt+S -> 불러온 CSV 파일 이름으로 다시 다운로드 (덮어쓰기처럼 보이게)
+    function altSave() {
+      if (!lastLoadedFileName) {
+        alert("불러온 파일이 없어서 Alt+S로 저장할 수 없습니다.")
+        return
+      }
+      const csvContent = dialogues.map(d => {
+        const mergeString = d.merge ? "true" : "false"
+        return [d.key, d.woman, d.manA, d.manB, mergeString, d.mergeTarget].join(",")
+      }).join("\n")
+
+      if (window.location.hostname.includes("chat.openai.com")) {
+        alert("이 환경에서는 파일 다운로드가 제한됩니다.\nCSV 내용:\n\n" + csvContent)
+        return
+      }
+
+      if (isIOS()) {
+        const fileURL = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent)
+        // iOS - open in new tab
+        const win = window.open(fileURL, '_blank')
+        if (!win) {
+          alert("팝업이 차단된 것 같습니다. 팝업을 허용해주세요.")
+        }
+      } else {
+        // 일반 브라우저 다운로드
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.setAttribute("href", url)
+        link.setAttribute("download", lastLoadedFileName)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
+    }
+
+    function parseCsv(csvText) {
+      dialogues = []
+      const lines = csvText.trim().split("\n")
+      for (let i = 0;i < lines.length;i++) {
+        const cols = lines[i].split(",")
+
+        const keyVal = cols[0] || ""
+        const womanVal = cols[1] || ""
+        const manAVal = cols[2] || ""
+        const manBVal = cols[3] || ""
+
+        let mergeVal = false
+        let mergeTargetVal = ""
+
+        if (cols.length >= 5) {
+          mergeVal = (cols[4].trim().toLowerCase() === "true")
+        }
+        if (cols.length >= 6) {
+          mergeTargetVal = cols[5].trim()
+        }
+
+        if (cols.length >= 4 && keyVal) {
+          dialogues.push({
+            key: keyVal,
+            woman: womanVal,
+            manA: manAVal,
+            manB: manBVal,
+            merge: mergeVal,
+            mergeTarget: mergeTargetVal
+          })
+        }
+      }
+    }
+
+    function ensureSKeyExists() {
+      const hasS = dialogues.some(d => d.key.trim() === "S")
+      if (!hasS) {
+        dialogues.push({
+          key: "S",
+          woman: "(처음으로 자리에 앉았다)",
+          manA: "어... 안녕?",
+          manB: "오랜만이야...",
+          merge: false,
+          mergeTarget: ""
+        })
+      }
+    }
+
+    function ensureENodeExists() {
+      let e = dialogues.find(x => x.key === "E")
+      if (!e) {
+        dialogues.push({
+          key: "E",
+          woman: "(여자가 자리에서 일어났다)",
+          manA: "",
+          manB: "",
+          merge: false,
+          mergeTarget: ""
+        })
+      }
+    }
+
+    function ensureDialogueExists(key) {
+      let d = dialogues.find(x => x.key === key)
+      if (!d) {
+        if (key === "E") {
+          d = {
+            key: "E",
+            woman: "(여자가 자리에서 일어났다)",
+            manA: "",
+            manB: "",
+            merge: false,
+            mergeTarget: ""
+          }
+        } else {
+          d = {
+            key: key,
+            woman: "(새로운 대사)",
+            manA: "A선택?",
+            manB: "B선택?",
+            merge: false,
+            mergeTarget: ""
+          }
+        }
+        dialogues.push(d)
+      }
+      return d
+    }
+
+    function getEffectiveKey(k) {
+      const d = dialogues.find(x => x.key === k)
+      if (d && d.merge && d.mergeTarget.trim() !== "") {
+        return d.mergeTarget.trim()
+      }
+      return k
+    }
+
+    function computeStep(k) {
+      if (k === "E") return 999
+      if (!k.startsWith("S")) return 0
+
+      let step = 1
+      const tail = k.substring(1)
+      for (const c of tail) {
+        if (c === "A" || c === "B") { step++ }
+        else if (c === "R") { step-- }
+        if (step < 1) return 0
+      }
+      return step
+    }
+
+    function isWritten(d) {
+      if (d.merge) return true
+      if (d.key === "E") {
+        return (d.woman.trim() !== "" && d.woman.trim() !== '(여자가 자리에서 일어났다)')
+      }
+      if (d.woman === '(새로운 대사)' && d.manA === 'A선택?' && d.manB === 'B선택?') {
+        return false
+      }
+      return true
+    }
+
+    function renderConversation() {
+      const sidebar = document.getElementById("sidebar")
+      sidebar.innerHTML = ""
+
+      function addBubble(text, isPlayer, nodeKey) {
+        const div = document.createElement("div")
+        div.className = "chat-bubble"
+        if (isPlayer) {
+          div.classList.add("player")
+        } else if (nodeKey) {
+          div.style.cursor = "pointer"
+          div.addEventListener("click", () => {
+            currentKey = nodeKey
+            renderConversation()
+            renderEditor(nodeKey)
+            renderGraph(nodeKey)
+          })
+        }
+        div.textContent = text
+        sidebar.appendChild(div)
+      }
+
+      let prefix = "S"
+      ensureDialogueExists("S")
+      addBubble('(S) 여: ' + (dialogues.find(x => x.key === "S").woman), false, "S")
+
+      const tail = currentKey.substring(1)
+      for (const c of tail) {
+        const eff = getEffectiveKey(prefix)
+        const node = dialogues.find(x => x.key === eff)
+        if (node) {
+          if (c === "A") {
+            addBubble(`당신(A): ${node.manA}`, true)
+            prefix += "A"
+          } else if (c === "B") {
+            addBubble(`당신(B): ${node.manB}`, true)
+            prefix += "B"
+          } else if (c === "R") {
+            addBubble('(Rewind!)', true)
+            prefix += "R"
+          }
+          const nextEff = getEffectiveKey(prefix)
+          ensureDialogueExists(nextEff)
+          const nextNode = dialogues.find(x => x.key === nextEff)
+          addBubble(`(${nextEff}) 여: ${nextNode.woman}`, false, nextEff)
+        }
+      }
+    }
+
+    function renderEditor(k) {
+      const d = ensureDialogueExists(k)
+      const ed = document.getElementById("editor")
+      ed.innerHTML = ""
+
+      if (k === "E") {
+        const keyDiv = document.createElement("div")
+        keyDiv.className = "field"
+        keyDiv.innerHTML = `<label>키:</label> <input type="text" value="E" disabled/>`
+        ed.appendChild(keyDiv)
+
+        const womanDiv = document.createElement("div")
+        womanDiv.className = "field"
+        womanDiv.innerHTML = `<label>여자의 응답:</label>\n<textarea id="womanInput">${d.woman}</textarea>`
+        ed.appendChild(womanDiv)
+
+        const mDiv = document.createElement("div")
+        mDiv.className = "merge-options"
+        const cstr = d.merge ? "checked" : ""
+        mDiv.innerHTML = `<label>머지: <input type="checkbox" id="mergeCheck" ${cstr}></label>\n<label>타겟키: <input type="text" id="mergeTargetInput" value="${d.mergeTarget}"/></label>`
+        ed.appendChild(mDiv)
+
+        const saveBtn = document.createElement("button")
+        saveBtn.textContent = "수정 내용 저장"
+        saveBtn.addEventListener("click", () => {
+          d.woman = (document.getElementById("womanInput")).value
+          d.merge = (document.getElementById("mergeCheck")).checked
+          d.mergeTarget = (document.getElementById("mergeTargetInput")).value
+          renderConversation()
+          renderEditor(k)
+          renderGraph(k)
+        })
+        ed.appendChild(saveBtn)
+
+        const rewBtn = document.createElement("button")
+        rewBtn.textContent = "Rewind(R)"
+        rewBtn.addEventListener("click", () => {
+          let eff = getEffectiveKey(currentKey)
+          currentKey = eff + "R"
+          ensureDialogueExists(currentKey)
+          renderConversation()
+          renderEditor(currentKey)
+          renderGraph(currentKey)
+        })
+        ed.appendChild(rewBtn)
+        return
+      }
+
+      const keyDiv = document.createElement("div")
+      keyDiv.className = "field"
+      keyDiv.innerHTML = `<label>키:</label> <input type="text" disabled value="${d.key}"/>`
+      ed.appendChild(keyDiv)
+
+      const womanDiv = document.createElement("div")
+      womanDiv.className = "field"
+      womanDiv.innerHTML = `<label>여자의 응답:</label>\n<textarea id="womanInput">${d.woman}</textarea>`
+      ed.appendChild(womanDiv)
+
+      const manA = document.createElement("div")
+      manA.className = "row"
+      manA.innerHTML = `<label>남자 A선택:</label>\n<textarea id="manAInput">${d.manA}</textarea>\n<span class="ab-buttons"><button id="inlineA">A로 진행</button></span>`
+      ed.appendChild(manA)
+
+      const manB = document.createElement("div")
+      manB.className = "row"
+      manB.innerHTML = `<label>남자 B선택:</label>\n<textarea id="manBInput">${d.manB}</textarea>\n<span class="ab-buttons"><button id="inlineB">B로 진행</button></span>`
+      ed.appendChild(manB)
+
+      const mergeDiv = document.createElement("div")
+      mergeDiv.className = "merge-options"
+      const cstr = d.merge ? "checked" : ""
+      mergeDiv.innerHTML = `<label>머지(merge): <input type="checkbox" id="mergeCheck" ${cstr}></label>\n<label>타겟 키: <input type="text" id="mergeTargetInput" value="${d.mergeTarget}"/></label>`
+      ed.appendChild(mergeDiv)
+
+      const save = document.createElement("button")
+      save.textContent = "수정 내용 저장"
+      save.addEventListener("click", () => {
+        d.woman = (document.getElementById("womanInput")).value
+        d.manA = (document.getElementById("manAInput")).value
+        d.manB = (document.getElementById("manBInput")).value
+        d.merge = (document.getElementById("mergeCheck")).checked
+        d.mergeTarget = (document.getElementById("mergeTargetInput")).value
+        renderConversation()
+        renderEditor(k)
+        renderGraph(k)
+      })
+      ed.appendChild(save)
+
+      const rew = document.createElement("button")
+      rew.textContent = "Rewind(R)"
+      rew.addEventListener("click", () => {
+        let eff = getEffectiveKey(currentKey)
+        currentKey = eff + "R"
+        ensureDialogueExists(currentKey)
+        renderConversation()
+        renderEditor(currentKey)
+        renderGraph(currentKey)
+      })
+      ed.appendChild(rew)
+
+      document.getElementById("inlineA").addEventListener("click", () => {
+        let eff = getEffectiveKey(currentKey)
+        currentKey = eff + "A"
+        ensureDialogueExists(currentKey)
+        renderConversation()
+        renderEditor(currentKey)
+        renderGraph(currentKey)
+      })
+
+      document.getElementById("inlineB").addEventListener("click", () => {
+        let eff = getEffectiveKey(currentKey)
+        currentKey = eff + "B"
+        ensureDialogueExists(currentKey)
+        renderConversation()
+        renderEditor(currentKey)
+        renderGraph(currentKey)
+      })
+    }
+
+    function renderGraph(k) {
+      const container = document.getElementById("rightSidebar")
+      container.innerHTML = `<h3>노드 그래프 (SVG)</h3>`
+
+      const incoming = []
+      const outgoing = [];
+
+      ["A", "B", "R"].forEach(sel => {
+        const eff = getEffectiveKey(k)
+        const newK = eff + sel
+        const finalK = getEffectiveKey(newK)
+        const st = computeStep(newK)
+        if (st > 0) {
+          ensureDialogueExists(newK)
+          outgoing.push({ label: sel, rawKey: newK, displayKey: finalK, step: st })
+        }
+      })
+
+      dialogues.forEach(d => {
+        ["A", "B", "R"].forEach(sel => {
+          const candidate = d.key + sel
+          const candidateEff = getEffectiveKey(candidate)
+          if (candidateEff === k) {
+            const st = computeStep(candidate)
+            if (st > 0) {
+              incoming.push({ from: d.key, choice: sel })
+            }
+          }
+        })
+      })
+
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+      svg.setAttribute("width", "280")
+      svg.setAttribute("height", "300")
+      svg.style.border = "1px solid #ccc"
+
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs")
+
+      const markerF = document.createElementNS("http://www.w3.org/2000/svg", "marker")
+      markerF.setAttribute("id", "arrowForward")
+      markerF.setAttribute("markerWidth", "10")
+      markerF.setAttribute("markerHeight", "10")
+      markerF.setAttribute("refX", "9")
+      markerF.setAttribute("refY", "3")
+      markerF.setAttribute("orient", "auto")
+
+      const pathF = document.createElementNS("http://www.w3.org/2000/svg", "path")
+      pathF.setAttribute("d", "M0,0 L0,6 L9,3 z")
+      pathF.setAttribute("fill", "#888")
+      markerF.appendChild(pathF)
+      defs.appendChild(markerF)
+
+      const pattern = document.createElementNS("http://www.w3.org/2000/svg", "pattern")
+      pattern.setAttribute("id", "diagHatch")
+      pattern.setAttribute("width", "6")
+      pattern.setAttribute("height", "6")
+      pattern.setAttribute("patternTransform", "rotate(45 0 0)")
+      pattern.setAttribute("patternUnits", "userSpaceOnUse")
+
+      const rectP = document.createElementNS("http://www.w3.org/2000/svg", "rect")
+      rectP.setAttribute("x", "0")
+      rectP.setAttribute("y", "0")
+      rectP.setAttribute("width", "6")
+      rectP.setAttribute("height", "6")
+      rectP.setAttribute("fill", "transparent")
+      pattern.appendChild(rectP)
+
+      const lineP = document.createElementNS("http://www.w3.org/2000/svg", "line")
+      lineP.setAttribute("x1", "0")
+      lineP.setAttribute("y1", "0")
+      lineP.setAttribute("x2", "0")
+      lineP.setAttribute("y2", "6")
+      lineP.setAttribute("stroke", "#999")
+      lineP.setAttribute("stroke-width", "2")
+      pattern.appendChild(lineP)
+
+      defs.appendChild(pattern)
+      svg.appendChild(defs)
+
+      const centerX = 140
+      const centerY = 150
+
+      const incSpacing = incoming.length > 0 ? 120 / incoming.length : 50
+      let incStartY = centerY - ((incoming.length - 1) * incSpacing) / 2
+
+      const outSpacing = outgoing.length > 0 ? 120 / outgoing.length : 50
+      let outStartY = centerY - ((outgoing.length - 1) * outSpacing) / 2
+
+      function createNode(cx, cy, nodeKey) {
+        const d = dialogues.find(x => x.key === nodeKey)
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g")
+        g.style.cursor = "pointer"
+        g.addEventListener("click", () => {
+          currentKey = nodeKey
+          renderConversation()
+          renderEditor(nodeKey)
+          renderGraph(nodeKey)
+        })
+
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle")
+        circle.setAttribute("cx", cx)
+        circle.setAttribute("cy", cy)
+        circle.setAttribute("r", "20")
+        if (isWritten(d)) {
+          circle.setAttribute("fill", "#fff")
+        } else {
+          circle.setAttribute("fill", "url(#diagHatch)")
+        }
+        circle.setAttribute("stroke", "#333")
+        circle.setAttribute("stroke-width", "2")
+        g.appendChild(circle)
+
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text")
+        text.setAttribute("x", cx)
+        text.setAttribute("y", cy + 5)
+        text.setAttribute("text-anchor", "middle")
+        text.setAttribute("font-size", "12")
+        text.setAttribute("fill", "#000")
+        text.textContent = nodeKey
+        g.appendChild(text)
+
+        svg.appendChild(g)
+      }
+
+      function createEdge(x1, y1, x2, y2, label) {
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line")
+        line.setAttribute("x1", x1)
+        line.setAttribute("y1", y1)
+        line.setAttribute("x2", x2)
+        line.setAttribute("y2", y2)
+        line.setAttribute("stroke", "#888")
+        line.setAttribute("stroke-width", "2")
+        line.setAttribute("marker-end", "url(#arrowForward)")
+        svg.appendChild(line)
+
+        if (label) {
+          const mx = (Number(x1) + Number(x2)) / 2
+          const my = (Number(y1) + Number(y2)) / 2 - 5
+          const t = document.createElementNS("http://www.w3.org/2000/svg", "text")
+          t.setAttribute("x", mx)
+          t.setAttribute("y", my)
+          t.setAttribute("text-anchor", "middle")
+          t.setAttribute("font-size", "12")
+          t.setAttribute("fill", "#444")
+          t.textContent = '(' + label + ')'
+          svg.appendChild(t)
+        }
+      }
+
+      createNode(centerX, centerY, k)
+
+      // incoming
+      incoming.forEach((inc, idx) => {
+        const yPos = incStartY + idx * incSpacing
+        createNode(40, yPos, inc.from)
+        createEdge(60, yPos, centerX - 20, centerY, inc.choice)
+      })
+
+      // outgoing
+      outgoing.forEach((o, idx) => {
+        const yPos = outStartY + idx * outSpacing
+        createNode(240, yPos, o.displayKey)
+        createEdge(centerX + 20, centerY, 220, yPos, o.label)
+      })
+
+      container.appendChild(svg)
+
+      const unDiv = document.createElement("div")
+      unDiv.innerHTML = '<h4>미작성 노드</h4>'
+
+      const incompleteByStep = {}
+      dialogues.forEach(d => {
+        // 만약 getEffectiveKey(d.key)가 d.key와 다르면, 실제로는 머지되었으므로
+        // 독립 노드로 취급하지 않는다 => 미작성 노드에서도 제외
+        const eff = getEffectiveKey(d.key)
+        if (eff !== d.key) {
+          // effectively merges, skip
+          return
+        }
+
+        const s = computeStep(d.key)
+        if (s > 0) {
+          if (!isWritten(d)) {
+            if (!incompleteByStep[s]) incompleteByStep[s] = []
+            incompleteByStep[s].push(d.key)
+          }
+        }
+      })
+
+      if (Object.keys(incompleteByStep).length === 0) {
+        unDiv.innerHTML += '<p>모두 작성됨</p>'
+      } else {
+        Object.keys(incompleteByStep).sort((a, b) => Number(a) - Number(b)).forEach(stepNum => {
+          const group = document.createElement("div")
+          group.className = "step-group"
+
+          const header = document.createElement("div")
+          header.className = "step-header"
+          header.textContent = `스텝 ${stepNum}`
+          group.appendChild(header)
+
+          incompleteByStep[stepNum].forEach(k2 => {
+            const sp = document.createElement("span")
+            sp.textContent = ' ' + k2 + ' '
+            sp.style.cursor = "pointer"
+            sp.addEventListener("click", () => {
+              currentKey = k2
+              renderConversation()
+              renderEditor(k2)
+              renderGraph(k2)
+            })
+            group.appendChild(sp)
+          })
+          unDiv.appendChild(group)
+        })
+      }
+
+      container.appendChild(unDiv)
+    }
+  </script>
+</body>
+
+</html>
